@@ -7,6 +7,7 @@ local character = player.Character or player.CharacterAdded:Wait()
 local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
 
 local antiCheat = ReplicatedStorage.Events.AntiCheat_TileWashed
+local plotHandler = ReplicatedStorage.Events.PlotHandler
 local powerWashTargets = workspace.PowerWashTargets
 
 local CLEAR_RADIUS = 12
@@ -38,23 +39,25 @@ local Window = Fluent:CreateWindow({
 	Title = "Infinite Power",
 	SubTitle = "by your game",
 	TabWidth = 160,
-	Size = UDim2.fromOffset(500, 300),
-	Acrylic = false, -- no blur
+	Size = UDim2.fromOffset(500, 350),
+	Acrylic = false,
 	Theme = "Dark",
 	MinimizeKey = Enum.KeyCode.LeftControl,
 })
 
 local Tabs = {
 	Main = Window:AddTab({ Title = "Main", Icon = "brush" }),
+	Collect = Window:AddTab({ Title = "Collect", Icon = "coins" }),
 }
 
-local totalCleared = 0
-local running = false
+-- ── MAIN TAB ──────────────────────────────────────────────────────────────────
 
--- Use a label instead of paragraph so we can update it via an Options reference
-local statusParagraph = Tabs.Main:AddParagraph({
-	Title = "Status",
-	Content = "Inactive — toggle to begin.",
+local running = false
+local totalCleared = 0
+
+Tabs.Main:AddParagraph({
+	Title = "Auto Tile Cleaner",
+	Content = "Walk through zones normally. Tiles ahead of you will be automatically cleared and registered.",
 })
 
 Tabs.Main:AddToggle("AutoClear", {
@@ -63,7 +66,6 @@ Tabs.Main:AddToggle("AutoClear", {
 	Default = false,
 }):OnChanged(function(value)
 	running = value
-
 	if running then
 		task.spawn(function()
 			while running do
@@ -90,25 +92,41 @@ Tabs.Main:AddToggle("AutoClear", {
 	end
 end)
 
-Tabs.Main:AddParagraph({
-	Title = "Tiles Cleared",
-	Content = "Check the output for live tile count.",
+-- ── COLLECT TAB ───────────────────────────────────────────────────────────────
+
+Tabs.Collect:AddParagraph({
+	Title = "Quick Collect",
+	Content = "Instantly collects all cash from your plot without needing to walk to the pickup point.",
 })
 
--- Print tile count to output periodically as a lightweight alternative
-task.spawn(function()
-	while true do
-		task.wait(2)
-		if running then
-			print("[Infinite Power] Tiles cleared: " .. totalCleared)
+local collectCooldown = false
+
+Tabs.Collect:AddButton({
+	Title = "Collect All Cash",
+	Description = "Fires CollectAll to your plot handler.",
+	Callback = function()
+		if collectCooldown then
+			Fluent:Notify({
+				Title = "Quick Collect",
+				Content = "Please wait before collecting again.",
+				Duration = 2,
+			})
+			return
 		end
-	end
-end)
-
-Tabs.Main:AddParagraph({
-	Title = "Info",
-	Content = "Walk through each zone normally. Tiles within " .. CLEAR_RADIUS .. " studs ahead of you will be automatically cleared and registered.",
+		collectCooldown = true
+		plotHandler:FireServer("CollectAll")
+		Fluent:Notify({
+			Title = "Quick Collect",
+			Content = "Collected!",
+			Duration = 2,
+		})
+		task.delay(0.8, function()
+			collectCooldown = false
+		end)
+	end,
 })
+
+-- ── INIT ──────────────────────────────────────────────────────────────────────
 
 Window:SelectTab(1)
 Fluent:Notify({
