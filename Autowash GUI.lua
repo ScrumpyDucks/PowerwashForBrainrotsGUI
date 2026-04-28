@@ -4,6 +4,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TeleportService = game:GetService("TeleportService")
 local PathfindingService = game:GetService("PathfindingService")
+local RunService = game:GetService("RunService")
 local player = Players.LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
 local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
@@ -82,6 +83,72 @@ local function matchesBrainrot(model, filter)
 	return model.Name == filter
 end
 
+-- ── TRACE LINES ──────────────────────────────────────────────────────────────
+
+local traces = {}
+local tracesEnabled = false
+
+local function createTrace(playerPos, targetPos)
+	local part = Instance.new("Part")
+	part.Size = Vector3.new(0.1, 0.1, 0.1)
+	part.Anchored = true
+	part.CanCollide = false
+	part.Transparency = 1
+	part.Parent = workspace
+
+	local att0 = Instance.new("Attachment")
+	att0.Parent = part
+
+	local att1 = Instance.new("Attachment")
+	att1.Parent = part
+
+	local beam = Instance.new("Beam")
+	beam.Attachment0 = att0
+	beam.Attachment1 = att1
+	beam.Width0 = 0.2
+	beam.Width1 = 0.2
+	beam.Color = ColorSequence.new(Color3.fromRGB(255, 200, 0))
+	beam.Transparency = NumberSequence.new(0.3)
+	beam.Parent = part
+
+	part.CFrame = CFrame.new(playerPos:Lerp(targetPos, 0.5), targetPos)
+	att0.WorldPosition = playerPos
+	att1.WorldPosition = targetPos
+
+	return part
+end
+
+local function updateTraces()
+	for _, traceData in pairs(traces) do
+		if traceData.part and traceData.part.Parent then
+			traceData.part:Destroy()
+		end
+	end
+	traces = {}
+
+	if not tracesEnabled or not highlightEnabled then return end
+
+	local playerPos = humanoidRootPart.Position
+	for _, model in ipairs(brainrotsFolder:GetChildren()) do
+		if matchesBrainrot(model, highlightFilter) then
+			local primary = model:IsA("Model") and model.PrimaryPart or (model:IsA("BasePart") and model or nil)
+			if primary then
+				local tracePart = createTrace(playerPos, primary.Position)
+				traces[model] = {part = tracePart}
+			end
+		end
+	end
+end
+
+local function clearAllTraces()
+	for _, traceData in pairs(traces) do
+		if traceData.part and traceData.part.Parent then
+			traceData.part:Destroy()
+		end
+	end
+	traces = {}
+end
+
 -- ── FLUENT UI ─────────────────────────────────────────────────────────────────
 
 local Window = Fluent:CreateWindow({
@@ -142,6 +209,42 @@ Tabs.Main:AddToggle("AutoClear", {
 		end)
 	end
 end)
+
+Tabs.Main:AddSlider("ClearRadius", {
+	Title = "Clear Radius",
+	Description = "How far ahead tiles will be cleared.",
+	Default = CLEAR_RADIUS,
+	Min = 5,
+	Max = 50,
+	Rounding = 0,
+	Callback = function(value)
+		CLEAR_RADIUS = value
+	end,
+})
+
+Tabs.Main:AddSlider("BatchSize", {
+	Title = "Batch Size",
+	Description = "How many tiles to clear per check.",
+	Default = BATCH_SIZE,
+	Min = 1,
+	Max = 20,
+	Rounding = 0,
+	Callback = function(value)
+		BATCH_SIZE = value
+	end,
+})
+
+Tabs.Main:AddSlider("CheckInterval", {
+	Title = "Check Interval",
+	Description = "How often to check for tiles (seconds).",
+	Default = CHECK_INTERVAL,
+	Min = 0.05,
+	Max = 1,
+	Rounding = 2,
+	Callback = function(value)
+		CHECK_INTERVAL = value
+	end,
+})
 
 -- ── TRAVEL TAB ────────────────────────────────────────────────────────────────
 
@@ -222,6 +325,21 @@ Tabs.Brainrot:AddToggle("BrainrotHighlight", {
 		end)
 	else
 		clearAllHighlights()
+		clearAllTraces()
+	end
+end)
+
+Tabs.Brainrot:AddToggle("BrainrotTraces", {
+	Title = "Brainrot Traces",
+	Description = "Draws yellow traces from player to highlighted brainrots.",
+	Default = false,
+}):OnChanged(function(value)
+	tracesEnabled = value
+	if tracesEnabled then
+		RunService:BindToRenderStep("TraceUpdater", Enum.RenderPriority.Camera.Value, updateTraces)
+	else
+		clearAllTraces()
+		pcall(function() RunService:UnbindFromRenderStep("TraceUpdater") end)
 	end
 end)
 
@@ -237,7 +355,7 @@ end)
 
 Tabs.Brainrot:AddToggle("AutoWalk", {
 	Title = "Auto Walk to Nearest Brainrot",
-	Description = "Automatically pathfinds to the closest matching brainrot.",
+	Description = "Automatically pathfinds to the closest matching brainrot and picks it up.",
 	Default = false,
 }):OnChanged(function(value)
 	autoWalking = value
@@ -246,6 +364,7 @@ Tabs.Brainrot:AddToggle("AutoWalk", {
 			while autoWalking do
 				local closest = nil
 				local closestDist = math.huge
+				local closestModel = nil
 				local playerPos = humanoidRootPart.Position
 
 				for _, model in ipairs(brainrotsFolder:GetChildren()) do
@@ -256,6 +375,7 @@ Tabs.Brainrot:AddToggle("AutoWalk", {
 							if dist < closestDist then
 								closestDist = dist
 								closest = primary
+								closestModel = model
 							end
 						end
 					end
@@ -285,6 +405,19 @@ Tabs.Brainrot:AddToggle("AutoWalk", {
 						humanoid:MoveTo(closest.Position)
 						humanoid.MoveToFinished:Wait(5)
 					end
+
+					-- Try to pick up using proximity prompt
+					if autoWalking and closestModel then
+						local prompt = closestModel:FindFirstChildWhichIsA("ProximityPrompt", true)
+						if prompt then
+							fireproximityprompt(prompt)
+						else
+							-- Hold E as fallback
+							keypress(Enum.KeyCode.E)
+							task.wait(0.5)
+							keyrelease(Enum.KeyCode.E)
+						end
+					end
 				end
 
 				task.wait(0.5)
@@ -298,13 +431,20 @@ end)
 
 -- ── PLAYER TAB ────────────────────────────────────────────────────────────────
 
-Tabs.Player:AddToggle("SpeedBoost", {
-	Title = "Speed Boost",
-	Description = "Doubles your walk speed from " .. BASE_SPEED .. " to " .. BOOST_SPEED .. ".",
-	Default = false,
-}):OnChanged(function(value)
-	humanoid.WalkSpeed = value and BOOST_SPEED or BASE_SPEED
-end)
+local customSpeed = BASE_SPEED
+
+Tabs.Player:AddSlider("WalkSpeed", {
+	Title = "Walk Speed",
+	Description = "Change your walk speed (can exceed 100).",
+	Default = BASE_SPEED,
+	Min = 16,
+	Max = 500,
+	Rounding = 0,
+	Callback = function(value)
+		customSpeed = value
+		humanoid.WalkSpeed = value
+	end,
+})
 
 -- ── INIT ──────────────────────────────────────────────────────────────────────
 
