@@ -13,6 +13,9 @@ local CLEAR_RADIUS = 12
 local BATCH_SIZE = 5
 local CHECK_INTERVAL = 0.1
 
+-- Zone 1 hardcoded position (from spawner CFrame)
+local ZONE1_POSITION = Vector3.new(32.067, 12.831, -141.121)
+
 -- ── TILE CACHE ────────────────────────────────────────────────────────────────
 
 local tileSet = {}
@@ -95,29 +98,19 @@ end)
 
 Tabs.Travel:AddParagraph({
 	Title = "Return to Start",
-	Content = "Teleports you back to the Zone 1 spawner.",
+	Content = "Teleports you back to the Zone 1 area.",
 })
 
 Tabs.Travel:AddButton({
 	Title = "Teleport to Zone 1",
 	Description = "Returns you to the beginning of the map.",
 	Callback = function()
-		local spawner = workspace.Game.Spawners:FindFirstChild("Zone1")
-		if spawner then
-			local cf = spawner:IsA("Model") and spawner:GetPivot() or spawner.CFrame
-			humanoidRootPart.CFrame = cf * CFrame.new(-10, 5, 0)
-			Fluent:Notify({
-				Title = "Travel",
-				Content = "Teleported to Zone 1.",
-				Duration = 3,
-			})
-		else
-			Fluent:Notify({
-				Title = "Travel",
-				Content = "Could not find Zone 1 spawner.",
-				Duration = 3,
-			})
-		end
+		humanoidRootPart.CFrame = CFrame.new(ZONE1_POSITION + Vector3.new(0, 5, 0))
+		Fluent:Notify({
+			Title = "Travel",
+			Content = "Teleported to Zone 1.",
+			Duration = 3,
+		})
 	end,
 })
 
