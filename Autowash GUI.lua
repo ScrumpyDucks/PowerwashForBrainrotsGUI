@@ -4,7 +4,6 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TeleportService = game:GetService("TeleportService")
 local PathfindingService = game:GetService("PathfindingService")
-local UserInputService = game:GetService("UserInputService")
 local player = Players.LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
 local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
@@ -13,19 +12,15 @@ local humanoid = character:WaitForChild("Humanoid")
 local antiCheat = ReplicatedStorage.Events.AntiCheat_TileWashed
 local powerWashTargets = workspace.PowerWashTargets
 local brainrotsFolder = workspace.Game.Brainrots
+local brainrotAssets = ReplicatedStorage.Assets.Brainrots
 
 local CLEAR_RADIUS = 12
 local BATCH_SIZE = 5
 local CHECK_INTERVAL = 0.1
 local PLACE_ID = 126349562582764
-local DEFAULT_SPEED = 16
-local BOOST_SPEED = 50
+local BASE_SPEED = 50
+local BOOST_SPEED = 100
 local ZONE1_POSITION = Vector3.new(32.067, 12.831, -141.121)
-
-local ZONE_NAMES = {
-	"Zone1", "Zone2", "Zone3", "Zone4", "Zone5",
-	"Zone6", "Zone7", "Zone8", "Zone9", "Zone10"
-}
 
 -- ── TILE CACHE ────────────────────────────────────────────────────────────────
 
@@ -45,6 +40,13 @@ powerWashTargets.ChildAdded:Connect(addTile)
 powerWashTargets.ChildRemoved:Connect(function(tile)
 	tileSet[tile] = nil
 end)
+
+-- ── BRAINROT NAMES ────────────────────────────────────────────────────────────
+
+local brainrotNames = {"Any"}
+for _, asset in ipairs(brainrotAssets:GetChildren()) do
+	table.insert(brainrotNames, asset.Name)
+end
 
 -- ── HIGHLIGHT CACHE ───────────────────────────────────────────────────────────
 
@@ -75,6 +77,11 @@ local function clearAllHighlights()
 	end
 end
 
+local function matchesBrainrot(model, filter)
+	if filter == "Any" then return true end
+	return model.Name == filter
+end
+
 -- ── FLUENT UI ─────────────────────────────────────────────────────────────────
 
 local Window = Fluent:CreateWindow({
@@ -88,13 +95,13 @@ local Window = Fluent:CreateWindow({
 })
 
 local Tabs = {
-	Main    = Window:AddTab({ Title = "Main",    Icon = "brush"     }),
-	Travel  = Window:AddTab({ Title = "Travel",  Icon = "map-pin"   }),
-	Brainrot = Window:AddTab({ Title = "Brainrot", Icon = "star"    }),
-	Player  = Window:AddTab({ Title = "Player",  Icon = "person-standing" }),
+	Main     = Window:AddTab({ Title = "Main",     Icon = "brush"           }),
+	Travel   = Window:AddTab({ Title = "Travel",   Icon = "map-pin"         }),
+	Brainrot = Window:AddTab({ Title = "Brainrot", Icon = "star"            }),
+	Player   = Window:AddTab({ Title = "Player",   Icon = "person-standing" }),
 }
 
--- ── MAIN TAB — AUTO TILE CLEANER ──────────────────────────────────────────────
+-- ── MAIN TAB ──────────────────────────────────────────────────────────────────
 
 Tabs.Main:AddParagraph({
 	Title = "Auto Tile Cleaner",
@@ -144,57 +151,15 @@ Tabs.Main:AddButton({
 			player:SetAttribute("PW_CutZone" .. i, nil)
 		end
 		player:SetAttribute("PW_CutAll", nil)
-		Fluent:Notify({
-			Title = "Reset",
-			Content = "All tile cut attributes cleared.",
-			Duration = 3,
-		})
+		Fluent:Notify({ Title = "Reset", Content = "All tile cut attributes cleared.", Duration = 3 })
 	end,
 })
 
 -- ── TRAVEL TAB ────────────────────────────────────────────────────────────────
 
 Tabs.Travel:AddParagraph({
-	Title = "Zone Teleporter",
-	Content = "Instantly teleport to any zone spawner.",
-})
-
--- Build dropdown options from zone names
-local zoneOptions = {}
-for _, name in ipairs(ZONE_NAMES) do
-	table.insert(zoneOptions, name)
-end
-
-local selectedZone = zoneOptions[1]
-
-Tabs.Travel:AddDropdown("ZonePicker", {
-	Title = "Select Zone",
-	Description = "Choose which zone to teleport to.",
-	Values = zoneOptions,
-	Default = zoneOptions[1],
-}):OnChanged(function(value)
-	selectedZone = value
-end)
-
-Tabs.Travel:AddButton({
-	Title = "Teleport to Selected Zone",
-	Description = "Teleports you to the chosen zone.",
-	Callback = function()
-		local spawner = workspace.Game.Spawners:FindFirstChild(selectedZone)
-		if spawner then
-			local cf = spawner:IsA("Model") and spawner:GetPivot() or spawner.CFrame
-			humanoidRootPart.CFrame = cf * CFrame.new(-10, 5, 0)
-			Fluent:Notify({ Title = "Travel", Content = "Teleported to " .. selectedZone, Duration = 3 })
-		else
-			-- Fallback: hardcoded Zone1 position if spawner not found
-			if selectedZone == "Zone1" then
-				humanoidRootPart.CFrame = CFrame.new(ZONE1_POSITION + Vector3.new(0, 5, 0))
-				Fluent:Notify({ Title = "Travel", Content = "Teleported to Zone 1 (fallback).", Duration = 3 })
-			else
-				Fluent:Notify({ Title = "Travel", Content = "Could not find " .. selectedZone .. " spawner.", Duration = 3 })
-			end
-		end
-	end,
+	Title = "Return to Start",
+	Content = "Teleports you back to the Zone 1 area.",
 })
 
 Tabs.Travel:AddButton({
@@ -220,25 +185,47 @@ Tabs.Travel:AddButton({
 
 Tabs.Brainrot:AddParagraph({
 	Title = "Brainrot Tools",
-	Content = "Highlight and auto-collect brainrots from workspace.Game.Brainrots.",
+	Content = "Highlight and auto-walk to brainrots. Select 'Any' to target all, or pick a specific brainrot.",
 })
 
+local highlightFilter = "Any"
+local walkFilter = "Any"
 local highlightEnabled = false
+local autoWalking = false
+
+-- Highlight dropdown
+Tabs.Brainrot:AddDropdown("HighlightFilter", {
+	Title = "Highlight Filter",
+	Description = "Which brainrot type to highlight.",
+	Values = brainrotNames,
+	Default = "Any",
+}):OnChanged(function(value)
+	highlightFilter = value
+	-- Refresh highlights if active
+	if highlightEnabled then
+		clearAllHighlights()
+		for _, model in ipairs(brainrotsFolder:GetChildren()) do
+			if matchesBrainrot(model, highlightFilter) then
+				addHighlight(model)
+			end
+		end
+	end
+end)
 
 Tabs.Brainrot:AddToggle("BrainrotHighlight", {
 	Title = "Brainrot Highlighter",
-	Description = "Draws a yellow box around all brainrots in the current area.",
+	Description = "Draws a yellow box around matching brainrots.",
 	Default = false,
 }):OnChanged(function(value)
 	highlightEnabled = value
 	if highlightEnabled then
-		-- Highlight existing brainrots
 		for _, model in ipairs(brainrotsFolder:GetChildren()) do
-			addHighlight(model)
+			if matchesBrainrot(model, highlightFilter) then
+				addHighlight(model)
+			end
 		end
-		-- Watch for new ones
 		brainrotsFolder.ChildAdded:Connect(function(model)
-			if highlightEnabled then
+			if highlightEnabled and matchesBrainrot(model, highlightFilter) then
 				addHighlight(model)
 			end
 		end)
@@ -250,11 +237,19 @@ Tabs.Brainrot:AddToggle("BrainrotHighlight", {
 	end
 end)
 
-local autoWalking = false
+-- Walk dropdown
+Tabs.Brainrot:AddDropdown("WalkFilter", {
+	Title = "Walk Filter",
+	Description = "Which brainrot type to walk towards.",
+	Values = brainrotNames,
+	Default = "Any",
+}):OnChanged(function(value)
+	walkFilter = value
+end)
 
 Tabs.Brainrot:AddToggle("AutoWalk", {
 	Title = "Auto Walk to Nearest Brainrot",
-	Description = "Automatically pathfinds to the closest brainrot pickup.",
+	Description = "Automatically pathfinds to the closest matching brainrot.",
 	Default = false,
 }):OnChanged(function(value)
 	autoWalking = value
@@ -266,12 +261,14 @@ Tabs.Brainrot:AddToggle("AutoWalk", {
 				local playerPos = humanoidRootPart.Position
 
 				for _, model in ipairs(brainrotsFolder:GetChildren()) do
-					local primary = model:IsA("Model") and model.PrimaryPart or (model:IsA("BasePart") and model or nil)
-					if primary then
-						local dist = (primary.Position - playerPos).Magnitude
-						if dist < closestDist then
-							closestDist = dist
-							closest = primary
+					if matchesBrainrot(model, walkFilter) then
+						local primary = model:IsA("Model") and model.PrimaryPart or (model:IsA("BasePart") and model or nil)
+						if primary then
+							local dist = (primary.Position - playerPos).Magnitude
+							if dist < closestDist then
+								closestDist = dist
+								closest = primary
+							end
 						end
 					end
 				end
@@ -304,24 +301,22 @@ Tabs.Brainrot:AddToggle("AutoWalk", {
 
 				task.wait(0.5)
 			end
-			humanoid:MoveTo(humanoidRootPart.Position) -- stop moving
+			humanoid:MoveTo(humanoidRootPart.Position)
 		end)
 	else
 		humanoid:MoveTo(humanoidRootPart.Position)
 	end
 end)
 
--- ── PLAYER TAB — SPEED & ANTI AFK ────────────────────────────────────────────
+-- ── PLAYER TAB ────────────────────────────────────────────────────────────────
 
 Tabs.Player:AddToggle("SpeedBoost", {
 	Title = "Speed Boost",
-	Description = "Increases your walk speed to " .. BOOST_SPEED .. ".",
+	Description = "Doubles your walk speed from " .. BASE_SPEED .. " to " .. BOOST_SPEED .. ".",
 	Default = false,
 }):OnChanged(function(value)
-	humanoid.WalkSpeed = value and BOOST_SPEED or DEFAULT_SPEED
+	humanoid.WalkSpeed = value and BOOST_SPEED or BASE_SPEED
 end)
-
-
 
 -- ── INIT ──────────────────────────────────────────────────────────────────────
 
