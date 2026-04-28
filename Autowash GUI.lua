@@ -309,28 +309,6 @@ Tabs.Brainrot:AddButton({
 		end
 	end,
 })
-		brainrotsFolder.ChildRemoved:Connect(function(model)
-			removeHighlight(model)
-		end)
-	else
-		clearAllHighlights()
-		clearAllTraces()
-	end
-end)
-
-Tabs.Brainrot:AddToggle("BrainrotTraces", {
-	Title = "Brainrot Traces",
-	Description = "Draws yellow traces from player to highlighted brainrots.",
-	Default = false,
-}):OnChanged(function(value)
-	tracesEnabled = value
-	if tracesEnabled then
-		RunService:BindToRenderStep("TraceUpdater", Enum.RenderPriority.Camera.Value, updateTraces)
-	else
-		clearAllTraces()
-		pcall(function() RunService:UnbindFromRenderStep("TraceUpdater") end)
-	end
-end)
 
 -- Walk dropdown
 Tabs.Brainrot:AddDropdown("WalkFilter", {
