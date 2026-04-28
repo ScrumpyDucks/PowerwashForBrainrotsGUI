@@ -143,18 +143,6 @@ Tabs.Main:AddToggle("AutoClear", {
 	end
 end)
 
-Tabs.Main:AddButton({
-	Title = "Reset Tile Attributes",
-	Description = "Clears all PW_CutZone attributes so you can test a fresh run.",
-	Callback = function()
-		for i = 1, 10 do
-			player:SetAttribute("PW_CutZone" .. i, nil)
-		end
-		player:SetAttribute("PW_CutAll", nil)
-		Fluent:Notify({ Title = "Reset", Content = "All tile cut attributes cleared.", Duration = 3 })
-	end,
-})
-
 -- ── TRAVEL TAB ────────────────────────────────────────────────────────────────
 
 Tabs.Travel:AddParagraph({
