@@ -2,6 +2,7 @@ local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TeleportService = game:GetService("TeleportService")
 local player = Players.LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
 local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
@@ -12,8 +13,8 @@ local powerWashTargets = workspace.PowerWashTargets
 local CLEAR_RADIUS = 12
 local BATCH_SIZE = 5
 local CHECK_INTERVAL = 0.1
+local PLACE_ID = 126349562582764
 
--- Zone 1 hardcoded position (from spawner CFrame)
 local ZONE1_POSITION = Vector3.new(32.067, 12.831, -141.121)
 
 -- ── TILE CACHE ────────────────────────────────────────────────────────────────
@@ -111,6 +112,20 @@ Tabs.Travel:AddButton({
 			Content = "Teleported to Zone 1.",
 			Duration = 3,
 		})
+	end,
+})
+
+Tabs.Travel:AddButton({
+	Title = "Relog",
+	Description = "Rejoins a fresh server. Useful for testing.",
+	Callback = function()
+		Fluent:Notify({
+			Title = "Relog",
+			Content = "Rejoining server...",
+			Duration = 3,
+		})
+		task.wait(1)
+		TeleportService:Teleport(PLACE_ID, player)
 	end,
 })
 
