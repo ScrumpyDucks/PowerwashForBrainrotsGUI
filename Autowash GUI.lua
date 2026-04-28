@@ -4,7 +4,6 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TeleportService = game:GetService("TeleportService")
 local PathfindingService = game:GetService("PathfindingService")
-local RunService = game:GetService("RunService")
 local player = Players.LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
 local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
@@ -52,16 +51,15 @@ end
 -- ── HIGHLIGHT CACHE ───────────────────────────────────────────────────────────
 
 local highlights = {}
-local highlightColor = Color3.fromRGB(255, 200, 0)
 
 local function addHighlight(model)
 	if highlights[model] then return end
 	local h = Instance.new("SelectionBox")
 	h.Adornee = model
-	h.Color3 = highlightColor
+	h.Color3 = Color3.fromRGB(255, 200, 0)
 	h.LineThickness = 0.05
 	h.SurfaceTransparency = 0.7
-	h.SurfaceColor3 = highlightColor
+	h.SurfaceColor3 = Color3.fromRGB(255, 200, 0)
 	h.Parent = model
 	highlights[model] = h
 end
@@ -82,21 +80,6 @@ end
 local function matchesBrainrot(model, filter)
 	if filter == "Any" then return true end
 	return model.Name == filter
-end
-
--- ── RAINBOW MODE ────────────────────────────────────────────────────────────
-
-local rainbowMode = false
-local rainbowHue = 0
-
-local function updateRainbow()
-	if not rainbowMode or not highlightEnabled then return end
-	rainbowHue = (rainbowHue + 0.01) % 1
-	local currentColor = Color3.fromHSV(rainbowHue, 1, 1)
-	for model, h in pairs(highlights) do
-		h.Color3 = currentColor
-		h.SurfaceColor3 = currentColor
-	end
 end
 
 -- ── FLUENT UI ─────────────────────────────────────────────────────────────────
@@ -160,39 +143,15 @@ Tabs.Main:AddToggle("AutoClear", {
 	end
 end)
 
-Tabs.Main:AddSlider("ClearRadius", {
-	Title = "Clear Radius",
-	Description = "How far ahead tiles will be cleared.",
-	Default = CLEAR_RADIUS,
-	Min = 5,
-	Max = 50,
-	Rounding = 0,
-	Callback = function(value)
-		CLEAR_RADIUS = value
-	end,
-})
-
-Tabs.Main:AddSlider("BatchSize", {
-	Title = "Batch Size",
-	Description = "How many tiles to clear per check.",
-	Default = BATCH_SIZE,
-	Min = 1,
-	Max = 20,
-	Rounding = 0,
-	Callback = function(value)
-		BATCH_SIZE = value
-	end,
-})
-
-Tabs.Main:AddSlider("CheckInterval", {
-	Title = "Check Interval",
-	Description = "How often to check for tiles (seconds).",
-	Default = CHECK_INTERVAL,
-	Min = 0.05,
-	Max = 1,
-	Rounding = 2,
-	Callback = function(value)
-		CHECK_INTERVAL = value
+Tabs.Main:AddButton({
+	Title = "Reset Tile Attributes",
+	Description = "Clears all PW_CutZone attributes so you can test a fresh run.",
+	Callback = function()
+		for i = 1, 10 do
+			player:SetAttribute("PW_CutZone" .. i, nil)
+		end
+		player:SetAttribute("PW_CutAll", nil)
+		Fluent:Notify({ Title = "Reset", Content = "All tile cut attributes cleared.", Duration = 3 })
 	end,
 })
 
@@ -255,7 +214,7 @@ end)
 
 Tabs.Brainrot:AddToggle("BrainrotHighlight", {
 	Title = "Brainrot Highlighter",
-	Description = "Draws a box around matching brainrots.",
+	Description = "Draws a yellow box around matching brainrots.",
 	Default = false,
 }):OnChanged(function(value)
 	highlightEnabled = value
@@ -278,38 +237,6 @@ Tabs.Brainrot:AddToggle("BrainrotHighlight", {
 	end
 end)
 
-Tabs.Brainrot:AddColorPicker("HighlightColor", {
-	Title = "Highlight Color",
-	Default = highlightColor,
-	Callback = function(value)
-		highlightColor = value
-		for model, h in pairs(highlights) do
-			h.Color3 = value
-			h.SurfaceColor3 = value
-		end
-	end,
-})
-
-Tabs.Brainrot:AddButton({
-	Title = "Rainbow Mode",
-	Description = "Fades between rainbow colors for highlights.",
-	Callback = function()
-		rainbowMode = not rainbowMode
-		if rainbowMode then
-			highlightColor = Color3.fromHSV(0, 1, 1)
-			for model, h in pairs(highlights) do
-				h.Color3 = highlightColor
-				h.SurfaceColor3 = highlightColor
-			end
-			RunService:BindToRenderStep("RainbowUpdater", Enum.RenderPriority.Camera.Value, updateRainbow)
-			Fluent:Notify({ Title = "Rainbow", Content = "Rainbow mode enabled!", Duration = 3 })
-		else
-			pcall(function() RunService:UnbindFromRenderStep("RainbowUpdater") end)
-			Fluent:Notify({ Title = "Rainbow", Content = "Rainbow mode disabled.", Duration = 3 })
-		end
-	end,
-})
-
 -- Walk dropdown
 Tabs.Brainrot:AddDropdown("WalkFilter", {
 	Title = "Walk Filter",
@@ -322,7 +249,7 @@ end)
 
 Tabs.Brainrot:AddToggle("AutoWalk", {
 	Title = "Auto Walk to Nearest Brainrot",
-	Description = "Automatically pathfinds to the closest matching brainrot and picks it up.",
+	Description = "Automatically pathfinds to the closest matching brainrot.",
 	Default = false,
 }):OnChanged(function(value)
 	autoWalking = value
@@ -331,7 +258,6 @@ Tabs.Brainrot:AddToggle("AutoWalk", {
 			while autoWalking do
 				local closest = nil
 				local closestDist = math.huge
-				local closestModel = nil
 				local playerPos = humanoidRootPart.Position
 
 				for _, model in ipairs(brainrotsFolder:GetChildren()) do
@@ -342,7 +268,6 @@ Tabs.Brainrot:AddToggle("AutoWalk", {
 							if dist < closestDist then
 								closestDist = dist
 								closest = primary
-								closestModel = model
 							end
 						end
 					end
@@ -372,19 +297,6 @@ Tabs.Brainrot:AddToggle("AutoWalk", {
 						humanoid:MoveTo(closest.Position)
 						humanoid.MoveToFinished:Wait(5)
 					end
-
-					-- Try to pick up using proximity prompt
-					if autoWalking and closestModel then
-						local prompt = closestModel:FindFirstChildWhichIsA("ProximityPrompt", true)
-						if prompt then
-							fireproximityprompt(prompt)
-						else
-							-- Hold E as fallback
-							keypress(Enum.KeyCode.E)
-							task.wait(0.5)
-							keyrelease(Enum.KeyCode.E)
-						end
-					end
 				end
 
 				task.wait(0.5)
@@ -398,20 +310,13 @@ end)
 
 -- ── PLAYER TAB ────────────────────────────────────────────────────────────────
 
-local customSpeed = BASE_SPEED
-
-Tabs.Player:AddSlider("WalkSpeed", {
-	Title = "Walk Speed",
-	Description = "Change your walk speed (can exceed 100).",
-	Default = BASE_SPEED,
-	Min = 16,
-	Max = 500,
-	Rounding = 0,
-	Callback = function(value)
-		customSpeed = value
-		humanoid.WalkSpeed = value
-	end,
-})
+Tabs.Player:AddToggle("SpeedBoost", {
+	Title = "Speed Boost",
+	Description = "Doubles your walk speed from " .. BASE_SPEED .. " to " .. BOOST_SPEED .. ".",
+	Default = false,
+}):OnChanged(function(value)
+	humanoid.WalkSpeed = value and BOOST_SPEED or BASE_SPEED
+end)
 
 -- ── INIT ──────────────────────────────────────────────────────────────────────
 
