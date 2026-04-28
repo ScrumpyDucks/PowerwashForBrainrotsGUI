@@ -84,75 +84,19 @@ local function matchesBrainrot(model, filter)
 	return model.Name == filter
 end
 
--- ── TRACE LINES ──────────────────────────────────────────────────────────────
+-- ── RAINBOW MODE ────────────────────────────────────────────────────────────
 
-local traces = {}
-local tracesEnabled = false
-local traceColor = Color3.fromRGB(255, 200, 0)
 local rainbowMode = false
 local rainbowHue = 0
 
-local function createTraceLine(playerPos, targetPos, color)
-	local distance = (targetPos - playerPos).Magnitude
-	local line = Instance.new("Part")
-	line.Size = Vector3.new(0.1, 0.1, distance)
-	line.CFrame = CFrame.lookAt(playerPos:Lerp(targetPos, 0.5), targetPos) * CFrame.Angles(0, math.rad(90), 0)
-	line.Anchored = true
-	line.CanCollide = false
-	line.Material = Enum.Material.Neon
-	line.Color = color
-	line.Transparency = 0.3
-	line.Parent = workspace
-	return line
-end
-
-local function updateTraces()
-	for _, trace in pairs(traces) do
-		if trace and trace.Parent then
-			trace:Destroy()
-		end
+local function updateRainbow()
+	if not rainbowMode or not highlightEnabled then return end
+	rainbowHue = (rainbowHue + 0.01) % 1
+	local currentColor = Color3.fromHSV(rainbowHue, 1, 1)
+	for model, h in pairs(highlights) do
+		h.Color3 = currentColor
+		h.SurfaceColor3 = currentColor
 	end
-	traces = {}
-
-	if not tracesEnabled and not rainbowMode then return end
-	if not highlightEnabled then
-		clearAllTraces()
-		return
-	end
-
-	local playerPos = humanoidRootPart.Position
-	local currentColor = traceColor
-
-	if rainbowMode then
-		rainbowHue = (rainbowHue + 0.01) % 1
-		currentColor = Color3.fromHSV(rainbowHue, 1, 1)
-		-- Update highlights to rainbow color
-		for model, h in pairs(highlights) do
-			h.Color3 = currentColor
-			h.SurfaceColor3 = currentColor
-		end
-	end
-
-	if not tracesEnabled then return end
-
-	for _, model in ipairs(brainrotsFolder:GetChildren()) do
-		if matchesBrainrot(model, highlightFilter) then
-			local primary = model:IsA("Model") and model.PrimaryPart or (model:IsA("BasePart") and model or nil)
-			if primary then
-				local line = createTraceLine(playerPos, primary.Position, currentColor)
-				table.insert(traces, line)
-			end
-		end
-	end
-end
-
-local function clearAllTraces()
-	for _, trace in pairs(traces) do
-		if trace and trace.Parent then
-			trace:Destroy()
-		end
-	end
-	traces = {}
 end
 
 -- ── FLUENT UI ─────────────────────────────────────────────────────────────────
@@ -331,7 +275,6 @@ Tabs.Brainrot:AddToggle("BrainrotHighlight", {
 		end)
 	else
 		clearAllHighlights()
-		clearAllTraces()
 	end
 end)
 
@@ -347,43 +290,21 @@ Tabs.Brainrot:AddColorPicker("HighlightColor", {
 	end,
 })
 
-Tabs.Brainrot:AddToggle("BrainrotTraces", {
-	Title = "Brainrot Traces",
-	Description = "Draws traces from player to highlighted brainrots.",
-	Default = false,
-}):OnChanged(function(value)
-	tracesEnabled = value
-	if tracesEnabled then
-		RunService:BindToRenderStep("TraceUpdater", Enum.RenderPriority.Camera.Value, updateTraces)
-	else
-		clearAllTraces()
-		pcall(function() RunService:UnbindFromRenderStep("TraceUpdater") end)
-	end
-end)
-
-Tabs.Brainrot:AddColorPicker("TraceColor", {
-	Title = "Trace Color",
-	Default = traceColor,
-	Callback = function(value)
-		traceColor = value
-		rainbowMode = false
-	end,
-})
-
 Tabs.Brainrot:AddButton({
 	Title = "Rainbow Mode",
-	Description = "Fades between rainbow colors for traces and highlights.",
+	Description = "Fades between rainbow colors for highlights.",
 	Callback = function()
 		rainbowMode = not rainbowMode
 		if rainbowMode then
-			traceColor = Color3.fromHSV(0, 1, 1)
 			highlightColor = Color3.fromHSV(0, 1, 1)
 			for model, h in pairs(highlights) do
 				h.Color3 = highlightColor
 				h.SurfaceColor3 = highlightColor
 			end
+			RunService:BindToRenderStep("RainbowUpdater", Enum.RenderPriority.Camera.Value, updateRainbow)
 			Fluent:Notify({ Title = "Rainbow", Content = "Rainbow mode enabled!", Duration = 3 })
 		else
+			pcall(function() RunService:UnbindFromRenderStep("RainbowUpdater") end)
 			Fluent:Notify({ Title = "Rainbow", Content = "Rainbow mode disabled.", Duration = 3 })
 		end
 	end,
