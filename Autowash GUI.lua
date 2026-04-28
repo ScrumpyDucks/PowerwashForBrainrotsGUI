@@ -39,8 +39,8 @@ end)
 -- ── FLUENT UI ─────────────────────────────────────────────────────────────────
 
 local Window = Fluent:CreateWindow({
-	Title = "Infinite Power",
-	SubTitle = "by your game",
+	Title = "Power Wash For Brainrot GUI",
+	SubTitle = "by Scrumpyducks",
 	TabWidth = 160,
 	Size = UDim2.fromOffset(500, 350),
 	Acrylic = false,
