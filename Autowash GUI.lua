@@ -7,7 +7,6 @@ local character = player.Character or player.CharacterAdded:Wait()
 local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
 
 local antiCheat = ReplicatedStorage.Events.AntiCheat_TileWashed
-local plotHandler = ReplicatedStorage.Events.PlotHandler
 local powerWashTargets = workspace.PowerWashTargets
 
 local CLEAR_RADIUS = 12
@@ -47,7 +46,7 @@ local Window = Fluent:CreateWindow({
 
 local Tabs = {
 	Main = Window:AddTab({ Title = "Main", Icon = "brush" }),
-	Collect = Window:AddTab({ Title = "Collect", Icon = "coins" }),
+	Travel = Window:AddTab({ Title = "Travel", Icon = "map-pin" }),
 }
 
 -- ── MAIN TAB ──────────────────────────────────────────────────────────────────
@@ -92,37 +91,33 @@ Tabs.Main:AddToggle("AutoClear", {
 	end
 end)
 
--- ── COLLECT TAB ───────────────────────────────────────────────────────────────
+-- ── TRAVEL TAB ────────────────────────────────────────────────────────────────
 
-Tabs.Collect:AddParagraph({
-	Title = "Quick Collect",
-	Content = "Instantly collects all cash from your plot without needing to walk to the pickup point.",
+Tabs.Travel:AddParagraph({
+	Title = "Return to Start",
+	Content = "Teleports you back to the Zone 1 spawner.",
 })
 
-local collectCooldown = false
-
-Tabs.Collect:AddButton({
-	Title = "Collect All Cash",
-	Description = "Fires CollectAll to your plot handler.",
+Tabs.Travel:AddButton({
+	Title = "Teleport to Zone 1",
+	Description = "Returns you to the beginning of the map.",
 	Callback = function()
-		if collectCooldown then
+		local spawner = workspace.Game.Spawners:FindFirstChild("Zone1")
+		if spawner then
+			local cf = spawner:IsA("Model") and spawner:GetPivot() or spawner.CFrame
+			humanoidRootPart.CFrame = cf * CFrame.new(-10, 5, 0)
 			Fluent:Notify({
-				Title = "Quick Collect",
-				Content = "Please wait before collecting again.",
-				Duration = 2,
+				Title = "Travel",
+				Content = "Teleported to Zone 1.",
+				Duration = 3,
 			})
-			return
+		else
+			Fluent:Notify({
+				Title = "Travel",
+				Content = "Could not find Zone 1 spawner.",
+				Duration = 3,
+			})
 		end
-		collectCooldown = true
-		plotHandler:FireServer("CollectAll")
-		Fluent:Notify({
-			Title = "Quick Collect",
-			Content = "Collected!",
-			Duration = 2,
-		})
-		task.delay(0.8, function()
-			collectCooldown = false
-		end)
 	end,
 })
 
