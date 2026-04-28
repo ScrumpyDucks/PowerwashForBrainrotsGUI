@@ -4,7 +4,6 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TeleportService = game:GetService("TeleportService")
 local PathfindingService = game:GetService("PathfindingService")
-local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local player = Players.LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
@@ -322,38 +321,7 @@ Tabs.Player:AddToggle("SpeedBoost", {
 	humanoid.WalkSpeed = value and BOOST_SPEED or DEFAULT_SPEED
 end)
 
-local antiAfkConnection = nil
 
-Tabs.Player:AddToggle("AntiAFK", {
-	Title = "Anti-AFK",
-	Description = "Prevents the game from kicking you for being idle.",
-	Default = false,
-}):OnChanged(function(value)
-	if value then
-		antiAfkConnection = RunService.Heartbeat:Connect(function()
-			-- Simulate input to prevent AFK detection
-			local args = {
-				[1] = 13,
-				[2] = false,
-			}
-			player:Kick() -- never actually called, just suppresses the AFK kick listener
-		end)
-		-- Proper anti-afk: fire a fake VirtualUser input periodically
-		antiAfkConnection = task.spawn(function()
-			local VirtualUser = game:GetService("VirtualUser")
-			while value do
-				player.Idled:Wait()
-				VirtualUser:CaptureController()
-				VirtualUser:ClickButton2(Vector2.new())
-			end
-		end)
-	else
-		if antiAfkConnection then
-			task.cancel(antiAfkConnection)
-			antiAfkConnection = nil
-		end
-	end
-end)
 
 -- ── INIT ──────────────────────────────────────────────────────────────────────
 
