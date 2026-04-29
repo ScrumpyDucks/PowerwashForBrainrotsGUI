@@ -4,6 +4,8 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TeleportService = game:GetService("TeleportService")
 local PathfindingService = game:GetService("PathfindingService")
+local RunService = game:GetService("RunService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
 local player = Players.LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
 local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
@@ -14,13 +16,16 @@ local powerWashTargets = workspace.PowerWashTargets
 local brainrotsFolder = workspace.Game.Brainrots
 local brainrotAssets = ReplicatedStorage.Assets.Brainrots
 
-local CLEAR_RADIUS = 12
-local BATCH_SIZE = 5
-local CHECK_INTERVAL = 0.1
 local PLACE_ID = 126349562582764
 local BASE_SPEED = 50
-local BOOST_SPEED = 100
 local ZONE1_POSITION = Vector3.new(32.067, 12.831, -141.121)
+
+-- Tile cleaner settings (modified by sliders)
+local settings = {
+	clearRadius = 12,
+	batchSize = 5,
+	checkInterval = 0.1,
+}
 
 -- ── TILE CACHE ────────────────────────────────────────────────────────────────
 
@@ -51,15 +56,19 @@ end
 -- ── HIGHLIGHT CACHE ───────────────────────────────────────────────────────────
 
 local highlights = {}
+local highlightColor = Color3.fromRGB(255, 200, 0)
+local rainbowEnabled = false
+local rainbowConnection = nil
+local rainbowHue = 0
 
 local function addHighlight(model)
 	if highlights[model] then return end
 	local h = Instance.new("SelectionBox")
 	h.Adornee = model
-	h.Color3 = Color3.fromRGB(255, 200, 0)
+	h.Color3 = highlightColor
 	h.LineThickness = 0.05
 	h.SurfaceTransparency = 0.7
-	h.SurfaceColor3 = Color3.fromRGB(255, 200, 0)
+	h.SurfaceColor3 = highlightColor
 	h.Parent = model
 	highlights[model] = h
 end
@@ -72,8 +81,15 @@ local function removeHighlight(model)
 end
 
 local function clearAllHighlights()
-	for model, _ in pairs(highlights) do
+	for model in pairs(highlights) do
 		removeHighlight(model)
+	end
+end
+
+local function updateHighlightColors(color)
+	for _, h in pairs(highlights) do
+		h.Color3 = color
+		h.SurfaceColor3 = color
 	end
 end
 
@@ -88,7 +104,7 @@ local Window = Fluent:CreateWindow({
 	Title = "Power Wash For Brainrot GUI",
 	SubTitle = "by Scrumpyducks",
 	TabWidth = 160,
-	Size = UDim2.fromOffset(560, 400),
+	Size = UDim2.fromOffset(580, 450),
 	Acrylic = false,
 	Theme = "Dark",
 	MinimizeKey = Enum.KeyCode.LeftControl,
@@ -125,10 +141,10 @@ Tabs.Main:AddToggle("AutoClear", {
 				local cleared = 0
 
 				for tile in pairs(tileSet) do
-					if cleared >= BATCH_SIZE then break end
+					if cleared >= settings.batchSize then break end
 					local offset = tile.Position - playerPos
 					local dist = offset.Magnitude
-					if dist <= CLEAR_RADIUS and offset.Unit:Dot(playerLook) > -0.5 then
+					if dist <= settings.clearRadius and offset.Unit:Dot(playerLook) > -0.5 then
 						tileSet[tile] = nil
 						antiCheat:FireServer(tile)
 						tile:Destroy()
@@ -137,23 +153,45 @@ Tabs.Main:AddToggle("AutoClear", {
 					end
 				end
 
-				task.wait(CHECK_INTERVAL)
+				task.wait(settings.checkInterval)
 			end
 		end)
 	end
 end)
 
-Tabs.Main:AddButton({
-	Title = "Reset Tile Attributes",
-	Description = "Clears all PW_CutZone attributes so you can test a fresh run.",
-	Callback = function()
-		for i = 1, 10 do
-			player:SetAttribute("PW_CutZone" .. i, nil)
-		end
-		player:SetAttribute("PW_CutAll", nil)
-		Fluent:Notify({ Title = "Reset", Content = "All tile cut attributes cleared.", Duration = 3 })
-	end,
-})
+Tabs.Main:AddSlider("ClearRadius", {
+	Title = "Clear Radius",
+	Description = "How far ahead tiles are cleared (studs).",
+	Default = 12,
+	Min = 4,
+	Max = 50,
+	Rounding = 0,
+}):OnChanged(function(value)
+	settings.clearRadius = value
+end)
+
+Tabs.Main:AddSlider("BatchSize", {
+	Title = "Batch Size",
+	Description = "How many tiles are cleared per cycle.",
+	Default = 5,
+	Min = 1,
+	Max = 30,
+	Rounding = 0,
+}):OnChanged(function(value)
+	settings.batchSize = value
+end)
+
+Tabs.Main:AddSlider("CheckInterval", {
+	Title = "Check Interval",
+	Description = "Seconds between each clear cycle. Lower = faster but more load.",
+	Default = 10,
+	Min = 1,
+	Max = 30,
+	Rounding = 0,
+}):OnChanged(function(value)
+	-- Slider is 1-30 mapped to 0.01-0.30 seconds
+	settings.checkInterval = value / 100
+end)
 
 -- ── TRAVEL TAB ────────────────────────────────────────────────────────────────
 
@@ -185,7 +223,7 @@ Tabs.Travel:AddButton({
 
 Tabs.Brainrot:AddParagraph({
 	Title = "Brainrot Tools",
-	Content = "Highlight and auto-walk to brainrots. Select 'Any' to target all, or pick a specific brainrot.",
+	Content = "Highlight and auto-collect brainrots. Select 'Any' to target all types.",
 })
 
 local highlightFilter = "Any"
@@ -193,7 +231,7 @@ local walkFilter = "Any"
 local highlightEnabled = false
 local autoWalking = false
 
--- Highlight dropdown
+-- Highlight filter dropdown
 Tabs.Brainrot:AddDropdown("HighlightFilter", {
 	Title = "Highlight Filter",
 	Description = "Which brainrot type to highlight.",
@@ -201,7 +239,6 @@ Tabs.Brainrot:AddDropdown("HighlightFilter", {
 	Default = "Any",
 }):OnChanged(function(value)
 	highlightFilter = value
-	-- Refresh highlights if active
 	if highlightEnabled then
 		clearAllHighlights()
 		for _, model in ipairs(brainrotsFolder:GetChildren()) do
@@ -212,9 +249,44 @@ Tabs.Brainrot:AddDropdown("HighlightFilter", {
 	end
 end)
 
+-- Color picker
+Tabs.Brainrot:AddColorpicker("HighlightColor", {
+	Title = "Highlight Color",
+	Default = Color3.fromRGB(255, 200, 0),
+}):OnChanged(function(value)
+	highlightColor = value
+	if not rainbowEnabled then
+		updateHighlightColors(highlightColor)
+	end
+end)
+
+-- Rainbow toggle
+Tabs.Brainrot:AddToggle("RainbowHighlight", {
+	Title = "Rainbow Highlight",
+	Description = "Makes the highlight cycle through rainbow colors.",
+	Default = false,
+}):OnChanged(function(value)
+	rainbowEnabled = value
+	if rainbowEnabled then
+		if rainbowConnection then rainbowConnection:Disconnect() end
+		rainbowConnection = RunService.Heartbeat:Connect(function(dt)
+			rainbowHue = (rainbowHue + dt * 0.3) % 1
+			local color = Color3.fromHSV(rainbowHue, 1, 1)
+			updateHighlightColors(color)
+		end)
+	else
+		if rainbowConnection then
+			rainbowConnection:Disconnect()
+			rainbowConnection = nil
+		end
+		updateHighlightColors(highlightColor)
+	end
+end)
+
+-- Highlight toggle
 Tabs.Brainrot:AddToggle("BrainrotHighlight", {
 	Title = "Brainrot Highlighter",
-	Description = "Draws a yellow box around matching brainrots.",
+	Description = "Draws a colored box around matching brainrots.",
 	Default = false,
 }):OnChanged(function(value)
 	highlightEnabled = value
@@ -237,19 +309,20 @@ Tabs.Brainrot:AddToggle("BrainrotHighlight", {
 	end
 end)
 
--- Walk dropdown
+-- Walk filter dropdown
 Tabs.Brainrot:AddDropdown("WalkFilter", {
 	Title = "Walk Filter",
-	Description = "Which brainrot type to walk towards.",
+	Description = "Which brainrot type to walk towards and collect.",
 	Values = brainrotNames,
 	Default = "Any",
 }):OnChanged(function(value)
 	walkFilter = value
 end)
 
+-- Auto walk + pickup toggle
 Tabs.Brainrot:AddToggle("AutoWalk", {
-	Title = "Auto Walk to Nearest Brainrot",
-	Description = "Automatically pathfinds to the closest matching brainrot.",
+	Title = "Auto Walk & Pickup",
+	Description = "Walks to nearest matching brainrot and holds E to pick it up.",
 	Default = false,
 }):OnChanged(function(value)
 	autoWalking = value
@@ -257,7 +330,7 @@ Tabs.Brainrot:AddToggle("AutoWalk", {
 		task.spawn(function()
 			while autoWalking do
 				local closest = nil
-				local closestDist = math.huge
+				local closestDart = math.huge
 				local playerPos = humanoidRootPart.Position
 
 				for _, model in ipairs(brainrotsFolder:GetChildren()) do
@@ -265,8 +338,8 @@ Tabs.Brainrot:AddToggle("AutoWalk", {
 						local primary = model:IsA("Model") and model.PrimaryPart or (model:IsA("BasePart") and model or nil)
 						if primary then
 							local dist = (primary.Position - playerPos).Magnitude
-							if dist < closestDist then
-								closestDist = dist
+							if dist < closestDart then
+								closestDart = dist
 								closest = primary
 							end
 						end
@@ -274,6 +347,7 @@ Tabs.Brainrot:AddToggle("AutoWalk", {
 				end
 
 				if closest then
+					-- Pathfind to brainrot
 					local path = PathfindingService:CreatePath({
 						AgentRadius = 2,
 						AgentHeight = 5,
@@ -297,6 +371,23 @@ Tabs.Brainrot:AddToggle("AutoWalk", {
 						humanoid:MoveTo(closest.Position)
 						humanoid.MoveToFinished:Wait(5)
 					end
+
+					-- Once close enough, find and trigger the proximity prompt
+					if closest and closest.Parent then
+						local prompt = nil
+						-- Search the model and its parent for a ProximityPrompt
+						local searchRoot = closest.Parent or closest
+						for _, desc in ipairs(searchRoot:GetDescendants()) do
+							if desc:IsA("ProximityPrompt") then
+								prompt = desc
+								break
+							end
+						end
+						if prompt and prompt.Enabled then
+							-- Hold E to trigger the prompt
+							fireproximityprompt(prompt)
+						end
+					end
 				end
 
 				task.wait(0.5)
@@ -310,12 +401,26 @@ end)
 
 -- ── PLAYER TAB ────────────────────────────────────────────────────────────────
 
+local currentSpeed = BASE_SPEED
+
+Tabs.Player:AddSlider("SpeedSlider", {
+	Title = "Walk Speed",
+	Description = "Set your walk speed. Base is " .. BASE_SPEED .. ".",
+	Default = BASE_SPEED,
+	Min = BASE_SPEED,
+	Max = 200,
+	Rounding = 0,
+}):OnChanged(function(value)
+	currentSpeed = value
+	humanoid.WalkSpeed = value
+end)
+
 Tabs.Player:AddToggle("SpeedBoost", {
 	Title = "Speed Boost",
-	Description = "Doubles your walk speed from " .. BASE_SPEED .. " to " .. BOOST_SPEED .. ".",
+	Description = "Applies the walk speed set by the slider above.",
 	Default = false,
 }):OnChanged(function(value)
-	humanoid.WalkSpeed = value and BOOST_SPEED or BASE_SPEED
+	humanoid.WalkSpeed = value and currentSpeed or BASE_SPEED
 end)
 
 -- ── INIT ──────────────────────────────────────────────────────────────────────
