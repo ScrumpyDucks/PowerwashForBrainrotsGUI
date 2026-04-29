@@ -5,11 +5,11 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TeleportService = game:GetService("TeleportService")
 local PathfindingService = game:GetService("PathfindingService")
 local RunService = game:GetService("RunService")
-local VirtualInputManager = game:GetService("VirtualInputManager")
 local player = Players.LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
 local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
 local humanoid = character:WaitForChild("Humanoid")
+local camera = workspace.CurrentCamera
 
 local antiCheat = ReplicatedStorage.Events.AntiCheat_TileWashed
 local powerWashTargets = workspace.PowerWashTargets
@@ -20,7 +20,6 @@ local PLACE_ID = 126349562582764
 local BASE_SPEED = 50
 local ZONE1_POSITION = Vector3.new(32.067, 12.831, -141.121)
 
--- Tile cleaner settings (modified by sliders)
 local settings = {
 	clearRadius = 12,
 	batchSize = 5,
@@ -53,13 +52,22 @@ for _, asset in ipairs(brainrotAssets:GetChildren()) do
 	table.insert(brainrotNames, asset.Name)
 end
 
--- ── HIGHLIGHT CACHE ───────────────────────────────────────────────────────────
+-- ── SHARED ESP STATE ──────────────────────────────────────────────────────────
 
-local highlights = {}
 local highlightColor = Color3.fromRGB(255, 200, 0)
 local rainbowEnabled = false
-local rainbowConnection = nil
 local rainbowHue = 0
+local rainbowConnection = nil
+local highlightFilter = "Any"
+
+local function matchesBrainrot(model, filter)
+	if filter == "Any" then return true end
+	return model.Name == filter
+end
+
+-- ── HIGHLIGHT SYSTEM ──────────────────────────────────────────────────────────
+
+local highlights = {}
 
 local function addHighlight(model)
 	if highlights[model] then return end
@@ -93,9 +101,99 @@ local function updateHighlightColors(color)
 	end
 end
 
-local function matchesBrainrot(model, filter)
-	if filter == "Any" then return true end
-	return model.Name == filter
+-- ── TRACER SYSTEM ─────────────────────────────────────────────────────────────
+
+local tracerGui = Instance.new("ScreenGui")
+tracerGui.Name = "BrainrotTracers"
+tracerGui.ResetOnSpawn = false
+tracerGui.IgnoreGuiInset = true
+tracerGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+tracerGui.Parent = player.PlayerGui
+
+local tracers = {}
+local tracerEnabled = false
+local tracerUpdateConnection = nil
+
+local function getOrigin()
+	local vp = camera.ViewportSize
+	return Vector2.new(vp.X / 2, vp.Y) -- bottom center of screen
+end
+
+local function addTracer(model)
+	if tracers[model] then return end
+	local line = Instance.new("Frame")
+	line.AnchorPoint = Vector2.new(0, 0.5)
+	line.BorderSizePixel = 0
+	line.BackgroundColor3 = highlightColor
+	line.Size = UDim2.fromOffset(0, 2)
+	line.Visible = false
+	line.Parent = tracerGui
+	tracers[model] = line
+end
+
+local function removeTracer(model)
+	if tracers[model] then
+		tracers[model]:Destroy()
+		tracers[model] = nil
+	end
+end
+
+local function clearAllTracers()
+	for model in pairs(tracers) do
+		removeTracer(model)
+	end
+end
+
+local function updateTracers(color)
+	local origin = getOrigin()
+	for model, line in pairs(tracers) do
+		if not model or not model.Parent then
+			line:Destroy()
+			tracers[model] = nil
+		else
+			local primary = model:IsA("Model") and model.PrimaryPart or (model:IsA("BasePart") and model or nil)
+			if primary then
+				local screenPos, onScreen = camera:WorldToViewportPoint(primary.Position)
+				local target = Vector2.new(screenPos.X, screenPos.Y)
+				if onScreen then
+					local diff = target - origin
+					local dist = diff.Magnitude
+					local angle = math.atan2(diff.Y, diff.X)
+					line.Visible = true
+					line.Size = UDim2.fromOffset(dist, 2)
+					line.Position = UDim2.fromOffset(origin.X, origin.Y)
+					line.Rotation = math.deg(angle)
+					line.BackgroundColor3 = color
+				else
+					line.Visible = false
+				end
+			end
+		end
+	end
+end
+
+-- ── SHARED RAINBOW LOOP ───────────────────────────────────────────────────────
+-- Drives both highlights and tracers from one heartbeat connection
+
+local function startRainbow()
+	if rainbowConnection then rainbowConnection:Disconnect() end
+	rainbowConnection = RunService.Heartbeat:Connect(function(dt)
+		rainbowHue = (rainbowHue + dt * 0.3) % 1
+		local color = Color3.fromHSV(rainbowHue, 1, 1)
+		updateHighlightColors(color)
+		if tracerEnabled then
+			updateTracers(color)
+		end
+	end)
+end
+
+local function stopRainbow()
+	if rainbowConnection then
+		rainbowConnection:Disconnect()
+		rainbowConnection = nil
+	end
+	updateHighlightColors(highlightColor)
+	updateTracers(highlightColor)
 end
 
 -- ── FLUENT UI ─────────────────────────────────────────────────────────────────
@@ -139,7 +237,6 @@ Tabs.Main:AddToggle("AutoClear", {
 				local playerPos = humanoidRootPart.Position
 				local playerLook = humanoidRootPart.CFrame.LookVector
 				local cleared = 0
-
 				for tile in pairs(tileSet) do
 					if cleared >= settings.batchSize then break end
 					local offset = tile.Position - playerPos
@@ -152,7 +249,6 @@ Tabs.Main:AddToggle("AutoClear", {
 						cleared += 1
 					end
 				end
-
 				task.wait(settings.checkInterval)
 			end
 		end)
@@ -162,36 +258,20 @@ end)
 Tabs.Main:AddSlider("ClearRadius", {
 	Title = "Clear Radius",
 	Description = "How far ahead tiles are cleared (studs).",
-	Default = 12,
-	Min = 4,
-	Max = 50,
-	Rounding = 0,
-}):OnChanged(function(value)
-	settings.clearRadius = value
-end)
+	Default = 12, Min = 4, Max = 50, Rounding = 0,
+}):OnChanged(function(value) settings.clearRadius = value end)
 
 Tabs.Main:AddSlider("BatchSize", {
 	Title = "Batch Size",
 	Description = "How many tiles are cleared per cycle.",
-	Default = 5,
-	Min = 1,
-	Max = 30,
-	Rounding = 0,
-}):OnChanged(function(value)
-	settings.batchSize = value
-end)
+	Default = 5, Min = 1, Max = 30, Rounding = 0,
+}):OnChanged(function(value) settings.batchSize = value end)
 
 Tabs.Main:AddSlider("CheckInterval", {
 	Title = "Check Interval",
-	Description = "Seconds between each clear cycle. Lower = faster but more load.",
-	Default = 10,
-	Min = 1,
-	Max = 30,
-	Rounding = 0,
-}):OnChanged(function(value)
-	-- Slider is 1-30 mapped to 0.01-0.30 seconds
-	settings.checkInterval = value / 100
-end)
+	Description = "Speed of each clear cycle. Higher = faster.",
+	Default = 10, Min = 1, Max = 30, Rounding = 0,
+}):OnChanged(function(value) settings.checkInterval = value / 100 end)
 
 -- ── TRAVEL TAB ────────────────────────────────────────────────────────────────
 
@@ -223,18 +303,17 @@ Tabs.Travel:AddButton({
 
 Tabs.Brainrot:AddParagraph({
 	Title = "Brainrot Tools",
-	Content = "Highlight and auto-collect brainrots. Select 'Any' to target all types.",
+	Content = "Highlight, trace, and auto-collect brainrots. Color picker and rainbow apply to both highlights and tracers.",
 })
 
-local highlightFilter = "Any"
-local walkFilter = "Any"
 local highlightEnabled = false
+local walkFilter = "Any"
 local autoWalking = false
 
--- Highlight filter dropdown
+-- Shared filter
 Tabs.Brainrot:AddDropdown("HighlightFilter", {
-	Title = "Highlight Filter",
-	Description = "Which brainrot type to highlight.",
+	Title = "ESP Filter",
+	Description = "Which brainrot type to highlight and trace.",
 	Values = brainrotNames,
 	Default = "Any",
 }):OnChanged(function(value)
@@ -242,45 +321,37 @@ Tabs.Brainrot:AddDropdown("HighlightFilter", {
 	if highlightEnabled then
 		clearAllHighlights()
 		for _, model in ipairs(brainrotsFolder:GetChildren()) do
-			if matchesBrainrot(model, highlightFilter) then
-				addHighlight(model)
-			end
+			if matchesBrainrot(model, highlightFilter) then addHighlight(model) end
+		end
+	end
+	if tracerEnabled then
+		clearAllTracers()
+		for _, model in ipairs(brainrotsFolder:GetChildren()) do
+			if matchesBrainrot(model, highlightFilter) then addTracer(model) end
 		end
 	end
 end)
 
--- Color picker
+-- Shared color picker
 Tabs.Brainrot:AddColorpicker("HighlightColor", {
-	Title = "Highlight Color",
+	Title = "ESP Color",
 	Default = Color3.fromRGB(255, 200, 0),
 }):OnChanged(function(value)
 	highlightColor = value
 	if not rainbowEnabled then
 		updateHighlightColors(highlightColor)
+		updateTracers(highlightColor)
 	end
 end)
 
--- Rainbow toggle
+-- Shared rainbow toggle
 Tabs.Brainrot:AddToggle("RainbowHighlight", {
-	Title = "Rainbow Highlight",
-	Description = "Makes the highlight cycle through rainbow colors.",
+	Title = "Rainbow",
+	Description = "Cycles highlight and tracer colors through a rainbow.",
 	Default = false,
 }):OnChanged(function(value)
 	rainbowEnabled = value
-	if rainbowEnabled then
-		if rainbowConnection then rainbowConnection:Disconnect() end
-		rainbowConnection = RunService.Heartbeat:Connect(function(dt)
-			rainbowHue = (rainbowHue + dt * 0.3) % 1
-			local color = Color3.fromHSV(rainbowHue, 1, 1)
-			updateHighlightColors(color)
-		end)
-	else
-		if rainbowConnection then
-			rainbowConnection:Disconnect()
-			rainbowConnection = nil
-		end
-		updateHighlightColors(highlightColor)
-	end
+	if rainbowEnabled then startRainbow() else stopRainbow() end
 end)
 
 -- Highlight toggle
@@ -292,24 +363,48 @@ Tabs.Brainrot:AddToggle("BrainrotHighlight", {
 	highlightEnabled = value
 	if highlightEnabled then
 		for _, model in ipairs(brainrotsFolder:GetChildren()) do
-			if matchesBrainrot(model, highlightFilter) then
-				addHighlight(model)
-			end
+			if matchesBrainrot(model, highlightFilter) then addHighlight(model) end
 		end
 		brainrotsFolder.ChildAdded:Connect(function(model)
-			if highlightEnabled and matchesBrainrot(model, highlightFilter) then
-				addHighlight(model)
-			end
+			if highlightEnabled and matchesBrainrot(model, highlightFilter) then addHighlight(model) end
 		end)
-		brainrotsFolder.ChildRemoved:Connect(function(model)
-			removeHighlight(model)
-		end)
+		brainrotsFolder.ChildRemoved:Connect(function(model) removeHighlight(model) end)
 	else
 		clearAllHighlights()
 	end
 end)
 
--- Walk filter dropdown
+-- Tracer toggle
+Tabs.Brainrot:AddToggle("BrainrotTracers", {
+	Title = "Brainrot Tracers",
+	Description = "Draws ESP lines from the bottom of your screen to each brainrot.",
+	Default = false,
+}):OnChanged(function(value)
+	tracerEnabled = value
+	if tracerEnabled then
+		for _, model in ipairs(brainrotsFolder:GetChildren()) do
+			if matchesBrainrot(model, highlightFilter) then addTracer(model) end
+		end
+		brainrotsFolder.ChildAdded:Connect(function(model)
+			if tracerEnabled and matchesBrainrot(model, highlightFilter) then addTracer(model) end
+		end)
+		brainrotsFolder.ChildRemoved:Connect(function(model) removeTracer(model) end)
+		-- Start update loop
+		tracerUpdateConnection = RunService.RenderStepped:Connect(function()
+			if not rainbowEnabled then
+				updateTracers(highlightColor)
+			end
+		end)
+	else
+		clearAllTracers()
+		if tracerUpdateConnection then
+			tracerUpdateConnection:Disconnect()
+			tracerUpdateConnection = nil
+		end
+	end
+end)
+
+-- Walk filter
 Tabs.Brainrot:AddDropdown("WalkFilter", {
 	Title = "Walk Filter",
 	Description = "Which brainrot type to walk towards and collect.",
@@ -319,10 +414,10 @@ Tabs.Brainrot:AddDropdown("WalkFilter", {
 	walkFilter = value
 end)
 
--- Auto walk + pickup toggle
+-- Auto walk + pickup
 Tabs.Brainrot:AddToggle("AutoWalk", {
 	Title = "Auto Walk & Pickup",
-	Description = "Walks to nearest matching brainrot and holds E to pick it up.",
+	Description = "Walks to nearest matching brainrot and picks it up.",
 	Default = false,
 }):OnChanged(function(value)
 	autoWalking = value
@@ -330,7 +425,7 @@ Tabs.Brainrot:AddToggle("AutoWalk", {
 		task.spawn(function()
 			while autoWalking do
 				local closest = nil
-				local closestDart = math.huge
+				local closestDist = math.huge
 				local playerPos = humanoidRootPart.Position
 
 				for _, model in ipairs(brainrotsFolder:GetChildren()) do
@@ -338,8 +433,8 @@ Tabs.Brainrot:AddToggle("AutoWalk", {
 						local primary = model:IsA("Model") and model.PrimaryPart or (model:IsA("BasePart") and model or nil)
 						if primary then
 							local dist = (primary.Position - playerPos).Magnitude
-							if dist < closestDart then
-								closestDart = dist
+							if dist < closestDist then
+								closestDist = dist
 								closest = primary
 							end
 						end
@@ -347,13 +442,7 @@ Tabs.Brainrot:AddToggle("AutoWalk", {
 				end
 
 				if closest then
-					-- Pathfind to brainrot
-					local path = PathfindingService:CreatePath({
-						AgentRadius = 2,
-						AgentHeight = 5,
-						AgentCanJump = true,
-					})
-
+					local path = PathfindingService:CreatePath({ AgentRadius = 2, AgentHeight = 5, AgentCanJump = true })
 					local success = pcall(function()
 						path:ComputeAsync(playerPos, closest.Position)
 					end)
@@ -361,9 +450,7 @@ Tabs.Brainrot:AddToggle("AutoWalk", {
 					if success and path.Status == Enum.PathStatus.Success then
 						for _, waypoint in ipairs(path:GetWaypoints()) do
 							if not autoWalking then break end
-							if waypoint.Action == Enum.PathWaypointAction.Jump then
-								humanoid.Jump = true
-							end
+							if waypoint.Action == Enum.PathWaypointAction.Jump then humanoid.Jump = true end
 							humanoid:MoveTo(waypoint.Position)
 							humanoid.MoveToFinished:Wait(3)
 						end
@@ -372,20 +459,13 @@ Tabs.Brainrot:AddToggle("AutoWalk", {
 						humanoid.MoveToFinished:Wait(5)
 					end
 
-					-- Once close enough, find and trigger the proximity prompt
 					if closest and closest.Parent then
-						local prompt = nil
-						-- Search the model and its parent for a ProximityPrompt
 						local searchRoot = closest.Parent or closest
 						for _, desc in ipairs(searchRoot:GetDescendants()) do
-							if desc:IsA("ProximityPrompt") then
-								prompt = desc
+							if desc:IsA("ProximityPrompt") and desc.Enabled then
+								fireproximityprompt(desc)
 								break
 							end
-						end
-						if prompt and prompt.Enabled then
-							-- Hold E to trigger the prompt
-							fireproximityprompt(prompt)
 						end
 					end
 				end
@@ -406,10 +486,7 @@ local currentSpeed = BASE_SPEED
 Tabs.Player:AddSlider("SpeedSlider", {
 	Title = "Walk Speed",
 	Description = "Set your walk speed. Base is " .. BASE_SPEED .. ".",
-	Default = BASE_SPEED,
-	Min = BASE_SPEED,
-	Max = 200,
-	Rounding = 0,
+	Default = BASE_SPEED, Min = BASE_SPEED, Max = 500, Rounding = 0,
 }):OnChanged(function(value)
 	currentSpeed = value
 	humanoid.WalkSpeed = value
@@ -417,7 +494,7 @@ end)
 
 Tabs.Player:AddToggle("SpeedBoost", {
 	Title = "Speed Boost",
-	Description = "Applies the walk speed set by the slider above.",
+	Description = "Applies the walk speed from the slider above.",
 	Default = false,
 }):OnChanged(function(value)
 	humanoid.WalkSpeed = value and currentSpeed or BASE_SPEED
